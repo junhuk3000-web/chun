@@ -261,7 +261,20 @@ def _handle_message(body: dict) -> dict:
     if not user_id or not text:
         raise ValueError("user_id 와 text(또는 message) 는 필수입니다.")
 
+    info = parse_birth_info(text)
+    new_complete = is_complete(info)
+
     s = sessions.get(user_id)
+    if s and new_complete:
+        # 이미 세션이 있는데(예: 본인 사주 상담 중) 메시지 안에 '완전한' 생년월일이 또
+        # 들어있으면, 십중팔구 다른 사람(가족/지인) 사주를 물어보려는 것이다. 이 경우
+        # 기존 세션의 사주로 답변(answer())하면 안 된다 — Claude가 엉뚱한 사람 사주를
+        # 기준으로 답하거나, "그 사람 정보는 없다"며 거절하는 어색한 응답이 나온다.
+        # 날짜가 기존 세션과 다르면 새 사람으로 간주하고 세션을 새로 시작한다.
+        same_date = s["saju"].get("생년월일시") == f"{info['year']:04d}-{info['month']:02d}-{info['day']:02d}"
+        if not same_date:
+            s = None
+
     if s:
         out = _apply_turn_limit(s["history"], answer(s["name"], s["saju"], s["history"], text))
         sessions.append_message(user_id, "user", text)
@@ -271,8 +284,7 @@ def _handle_message(body: dict) -> dict:
             "show_buttons": out["show_buttons"], "new_session": False,
         }
 
-    info = parse_birth_info(text)
-    if not is_complete(info):
+    if not new_complete:
         return {
             "user_id": user_id,
             "reply": "생년월일시를 알려주시면 만세력으로 사주를 봐드릴게요. 줄바꿈 없이 **한 줄로** '1990년 7월 10일 오전 5시 여성'처럼 편하게 보내주세요 🔮",
