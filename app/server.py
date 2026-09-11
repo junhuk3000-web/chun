@@ -243,18 +243,27 @@ def _handle_message(body: dict) -> dict:
 
 
 def _manychat(result: dict) -> dict:
-    """매니챗 External Request 'Dynamic Content' 응답 포맷.
-    추천질문은 v1 에서는 본문에 덧붙인다(버튼 배선은 매니챗 플로우에서 별도)."""
+    """매니챗 'Dynamic Content' 블록용 응답 포맷 (External Request 의 Response mapping
+    필드 2개 제한을 피하려면 이 엔드포인트(/api/manychat/*)를 Dynamic Content 블록에
+    연결한다 — 필드 매핑 없이 이 JSON 전체가 메시지+버튼으로 그대로 렌더링됨).
+
+    quick_replies 는 messenger 스타일 텍스트 버튼(caption/title 둘 다 채워 호환성 확보)
+    으로 최대 3개까지 실어 보낸다. 혹시 매니챗이 이 구조를 못 읽으면(버튼이 안 뜨면)
+    최소한 텍스트로는 추천 질문이 보이게 본문에도 짧게 덧붙인다."""
     text = result["reply"]
-    qs = result.get("quick_replies") or []
+    qs = (result.get("quick_replies") or [])[:3]
     if qs:
-        text += "\n\n💬 이어서 물어보실 수 있어요:\n" + "\n".join(f"· {q}" for q in qs)
+        text += "\n\n💬 " + " / ".join(qs)
+    message = {"type": "text", "text": text}
+    if qs:
+        message["quick_replies"] = [
+            {"type": "text", "caption": q, "title": q} for q in qs
+        ]
     return {
         "version": "v2",
-        "content": {"messages": [{"type": "text", "text": text}]},
-        # 매니챗 커스텀 필드로도 받고 싶을 때 매핑용:
+        "content": {"messages": [message]},
         "user_id": result.get("user_id"),
-        "quick_replies": qs,
+        "quick_replies": qs,  # 커스텀 필드로 따로 매핑하고 싶을 때 대비
     }
 
 
