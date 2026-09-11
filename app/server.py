@@ -126,6 +126,45 @@ def _continue_session(body: dict) -> dict:
     return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"]}
 
 
+def _handle_message(body: dict) -> dict:
+    """단일 엔드포인트로 '첫 연락(생년월일시 파싱→세션생성→첫풀이)'과
+    '후속 질문(세션 이어서 답변)'을 모두 처리. 매니챗 쪽에 automation을
+    두 개(트리거용/대화용) 따로 안 만들어도 되게 하기 위함."""
+    user_id = str(body.get("user_id") or "")
+    text = (body.get("text") or body.get("message") or "").strip()
+    name = (body.get("name") or "").strip() or None
+    if not user_id or not text:
+        raise ValueError("user_id 와 text(또는 message) 는 필수입니다.")
+
+    s = sessions.get(user_id)
+    if s:
+        out = answer(s["name"], s["saju"], s["history"], text)
+        sessions.append_message(user_id, "user", text)
+        sessions.append_message(user_id, "assistant", out["reply"])
+        return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "new_session": False}
+
+    info = parse_birth_info(text)
+    if not is_complete(info):
+        return {
+            "user_id": user_id,
+            "reply": "생년월일시를 알려주시면 만세력으로 사주를 봐드릴게요. 예) '1990년 7월 10일 오전 5시 여성'처럼 편하게 보내주세요 🔮",
+            "quick_replies": [],
+            "new_session": False,
+        }
+
+    result = calculate(
+        year=info["year"], month=info["month"], day=info["day"],
+        hour=info.get("hour", 12), minute=info.get("minute", 0),
+        city=body.get("city") or DEFAULT_CITY, gender=info.get("gender"), is_lunar=info.get("is_lunar", False),
+    )
+    saju = result.to_prompt_dict()
+    sessions.create(user_id, name, saju)
+    out = first_reading(name, saju, category=body.get("category") or "종합운")
+    sessions.append_message(user_id, "user", f"(생년월일시 제공: {text})")
+    sessions.append_message(user_id, "assistant", out["reply"])
+    return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "new_session": True, "saju": saju}
+
+
 def _manychat(result: dict) -> dict:
     """매니챗 External Request 'Dynamic Content' 응답 포맷.
     추천질문은 v1 에서는 본문에 덧붙인다(버튼 배선은 매니챗 플로우에서 별도)."""
@@ -184,6 +223,23 @@ def api_chat():
         return jsonify({"error": str(e)}), 404
     except ChatError as e:
         return jsonify({"error": str(e)}), 502
+
+
+@app.post("/api/message")
+def api_message():
+    """매니챗 등 단일 트리거(예: Instagram Default Reply = 모든 수신 메시지)용 통합 엔드포인트.
+    세션 없으면 텍스트에서 생년월일시를 파싱해 새로 시작, 있으면 후속 질문으로 처리.
+    body: {"user_id": "...", "text": "...", "name"?, "category"?}"""
+    if (u := _check_secret()):
+        return u
+    try:
+        return jsonify(_handle_message(request.get_json(silent=True) or {}))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
+    except ChatError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"사주 계산 실패: {e}"}), 400
 
 
 @app.post("/api/session/reset")
