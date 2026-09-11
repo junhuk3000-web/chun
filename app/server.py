@@ -165,10 +165,17 @@ LANDING_PAGE_URL = os.environ.get("LANDING_PAGE_URL", "").strip()
 
 def _apply_turn_limit(prior_history: list, out: dict) -> dict:
     turn_index = len(prior_history) // 2 + 1  # 이번 응답이 세션에서 몇 번째 턴인지(1부터, 첫 풀이=1)
-    if turn_index <= MAX_FREE_TURNS:
-        return out
     out = dict(out)
+    if turn_index <= MAX_FREE_TURNS:
+        out["show_buttons"] = True
+        return out
+    # 매니챗은 quick_replies 배열이 비어도 qr1/qr2/qr3 커스텀필드를 '비우지' 않고
+    # 이전 값을 그대로 들고 있는다(Response mapping 이 매핑 대상이 없으면 no-op이라
+    # 필드가 클리어되지 않음) — 그래서 버튼이 안 사라지고 계속 떠 있는 문제가 생긴다.
+    # 대신 명시적인 show_buttons 플래그를 내려줘서, 매니챗 쪽에서 이 값으로
+    # Condition(분기) 걸어 버튼 있는/없는 Send Message 블록을 나눠 타게 한다.
     out["quick_replies"] = []
+    out["show_buttons"] = False
     if LANDING_PAGE_URL:
         out["reply"] = out["reply"] + f"\n\n더 자세히 보고 싶으면 여기서 확인해봐 👉 {LANDING_PAGE_URL}"
         out["cta_url"] = LANDING_PAGE_URL
@@ -218,7 +225,10 @@ def _start_session(body: dict) -> dict:
     out = _apply_turn_limit([], first_reading(name, saju, category=category))
     sessions.append_message(user_id, "user", f"({category} 첫 풀이 요청)")
     sessions.append_message(user_id, "assistant", out["reply"])
-    return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "saju": saju}
+    return {
+        "user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"],
+        "show_buttons": out["show_buttons"], "saju": saju,
+    }
 
 
 def _continue_session(body: dict) -> dict:
@@ -234,7 +244,10 @@ def _continue_session(body: dict) -> dict:
     out = _apply_turn_limit(s["history"], answer(s["name"], s["saju"], s["history"], message))
     sessions.append_message(user_id, "user", message)
     sessions.append_message(user_id, "assistant", out["reply"])
-    return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"]}
+    return {
+        "user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"],
+        "show_buttons": out["show_buttons"],
+    }
 
 
 def _handle_message(body: dict) -> dict:
@@ -253,7 +266,10 @@ def _handle_message(body: dict) -> dict:
         out = _apply_turn_limit(s["history"], answer(s["name"], s["saju"], s["history"], text))
         sessions.append_message(user_id, "user", text)
         sessions.append_message(user_id, "assistant", out["reply"])
-        return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "new_session": False}
+        return {
+            "user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"],
+            "show_buttons": out["show_buttons"], "new_session": False,
+        }
 
     info = parse_birth_info(text)
     if not is_complete(info):
@@ -261,6 +277,7 @@ def _handle_message(body: dict) -> dict:
             "user_id": user_id,
             "reply": "생년월일시를 알려주시면 만세력으로 사주를 봐드릴게요. 줄바꿈 없이 **한 줄로** '1990년 7월 10일 오전 5시 여성'처럼 편하게 보내주세요 🔮",
             "quick_replies": [],
+            "show_buttons": False,
             "new_session": False,
         }
 
@@ -274,7 +291,10 @@ def _handle_message(body: dict) -> dict:
     out = _apply_turn_limit([], first_reading(name, saju, category=body.get("category") or "종합운"))
     sessions.append_message(user_id, "user", f"(생년월일시 제공: {text})")
     sessions.append_message(user_id, "assistant", out["reply"])
-    return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "new_session": True, "saju": saju}
+    return {
+        "user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"],
+        "show_buttons": out["show_buttons"], "new_session": True, "saju": saju,
+    }
 
 
 def _manychat(result: dict) -> dict:
@@ -366,6 +386,7 @@ def api_message():
             "user_id": body.get("user_id"),
             "reply": "생년월일시를 다시 한번 편하게 보내줄래? 예) '1990년 7월 10일 오전 5시 여성' 🙏",
             "quick_replies": [],
+            "show_buttons": False,
             "error": str(e),
         })
     except ChatError as e:
@@ -373,6 +394,7 @@ def api_message():
             "user_id": body.get("user_id"),
             "reply": "어 미안, 지금 답변 만드는 데 문제가 생겼어. 잠시 후에 다시 물어봐줄래? 🙏",
             "quick_replies": [],
+            "show_buttons": False,
             "error": str(e),
         })
     except Exception as e:  # noqa: BLE001
@@ -380,6 +402,7 @@ def api_message():
             "user_id": body.get("user_id"),
             "reply": "어 미안, 계산하다 오류가 났어. 생년월일시 형식 확인하고 다시 보내줄래? 🙏",
             "quick_replies": [],
+            "show_buttons": False,
             "error": str(e),
         })
 
