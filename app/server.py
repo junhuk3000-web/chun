@@ -88,11 +88,22 @@ def _parse_body_lenient(raw: bytes) -> dict:
 
 
 def _body() -> dict:
-    """request JSON body를 읽되, 파싱 실패 시 관대한 복구를 시도한다."""
+    """request JSON body를 읽되, 파싱 실패 시 관대한 복구를 시도한다.
+    거기에 더해 쿼리스트링(?user_id=...&text=...) 값이 있으면 그걸 우선 사용한다.
+    매니챗 등이 자유 텍스트를 손으로 타이핑한 JSON 문자열 안에 끼워 넣을 때 줄바꿈을
+    이스케이프하지 않아 깨지는 경우가 있는데, URL 쿼리 파라미터는 표준 URL 인코딩이라
+    훨씬 안정적으로 들어온다. Request URL 을
+      https://.../api/message?user_id={{Contact Id}}&text={{Last Text Input}}
+    처럼 구성하면(Body는 비워도 됨) 이 경로로 안전하게 수신된다."""
     data = request.get_json(silent=True)
-    if data is not None:
-        return data
-    return _parse_body_lenient(request.get_data())
+    if data is None:
+        data = _parse_body_lenient(request.get_data())
+    data = dict(data) if data else {}
+    for key in _LENIENT_FIELDS:
+        v = request.args.get(key)
+        if v:
+            data[key] = v
+    return data
 
 
 # ---------------------------------------------------------------------------
