@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>천명재 사주 상담</title>
+<style>
+  :root{
+    --bg:#12101a; --panel:#1c1930; --bubble-bot:#262238; --bubble-me:#6c5ce7;
+    --text:#efeaf7; --muted:#9a93b2; --accent:#c9a94b; --line:#2e2942;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font:16px/1.6 -apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif}
+  #app{max-width:560px;margin:0 auto;min-height:100%;display:flex;flex-direction:column}
+  header{padding:18px 18px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:2}
+  header h1{margin:0;font-size:18px;letter-spacing:.02em}
+  header p{margin:2px 0 0;font-size:13px;color:var(--muted)}
+
+  /* 시작 폼 */
+  .intro{padding:22px 18px;display:flex;flex-direction:column;gap:14px}
+  .intro label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px}
+  .intro input,.intro select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);font:inherit}
+  .row{display:flex;gap:10px}.row>div{flex:1}
+  .primary{margin-top:6px;padding:14px;border:0;border-radius:12px;background:var(--accent);color:#221c05;
+    font-weight:800;font-size:16px;cursor:pointer}
+  .primary:disabled{opacity:.5}
+  .hint{font-size:12px;color:var(--muted)}
+
+  /* 채팅 */
+  .chat{flex:1;padding:16px 14px 4px;display:flex;flex-direction:column;gap:12px;overflow-y:auto}
+  .msg{max-width:82%;padding:12px 14px;border-radius:16px;white-space:pre-wrap;word-break:break-word}
+  .bot{align-self:flex-start;background:var(--bubble-bot);border-bottom-left-radius:5px}
+  .me{align-self:flex-end;background:var(--bubble-me);color:#fff;border-bottom-right-radius:5px}
+  .typing{align-self:flex-start;color:var(--muted);font-size:14px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;padding:4px 14px 10px}
+  .chip{padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);
+    color:var(--text);font-size:13px;cursor:pointer}
+  .composer{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);
+    padding:10px 12px;display:flex;gap:8px}
+  .composer input{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);font:inherit}
+  .composer button{padding:0 16px;border:0;border-radius:12px;background:var(--accent);color:#221c05;font-weight:800;cursor:pointer}
+  .err{color:#ff9b9b;font-size:13px;padding:0 16px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>천명재 · 사주 상담</h1>
+    <p id="sub">이름과 태어난 날짜·시간을 넣으면 만세력으로 봐드려요</p>
+  </header>
+
+  <form class="intro" id="intro">
+    <div>
+      <label>이름 (호칭용, 사주엔 영향 없어요)</label>
+      <input id="f-name" autocomplete="name" placeholder="예) 서아" />
+    </div>
+    <div class="row">
+      <div><label>생년(4자리)</label><input id="f-y" inputmode="numeric" placeholder="1990" /></div>
+      <div><label>월</label><input id="f-m" inputmode="numeric" placeholder="7" /></div>
+      <div><label>일</label><input id="f-d" inputmode="numeric" placeholder="10" /></div>
+    </div>
+    <div class="row">
+      <div><label>태어난 시 (0~23, 모르면 비움)</label><input id="f-h" inputmode="numeric" placeholder="5" /></div>
+      <div><label>양/음력</label><select id="f-cal"><option value="0">양력</option><option value="1">음력</option></select></div>
+      <div><label>성별</label><select id="f-g"><option value="">선택안함</option><option>여성</option><option>남성</option></select></div>
+    </div>
+    <div>
+      <label>먼저 궁금한 주제</label>
+      <select id="f-cat">
+        <option>종합운</option><option>연애운</option><option>재회운</option>
+        <option>금전운</option><option>결혼운</option><option>직업운</option>
+      </select>
+    </div>
+    <button class="primary" type="submit" id="start">상담 시작</button>
+    <p class="hint">입력하신 생년월일시는 사주 상담 목적으로만 쓰이고, 상담 뒤 보관하지 않아요.</p>
+    <p class="err" id="intro-err" hidden></p>
+  </form>
+
+  <div class="chat" id="chat" hidden></div>
+  <div class="chips" id="chips" hidden></div>
+  <form class="composer" id="composer" hidden>
+    <input id="q" placeholder="궁금한 걸 물어보세요…" autocomplete="off" />
+    <button type="submit">보내기</button>
+  </form>
+  <p class="err" id="chat-err" hidden></p>
+</div>
+
+<script>
+const API = location.origin;                       // 같은 서버에서 서빙
+const $ = (s) => document.querySelector(s);
+let userId = localStorage.getItem("cmj_uid") || "";
+
+const introEl = $("#intro"), chatEl = $("#chat"), chipsEl = $("#chips"),
+      composerEl = $("#composer"), introErr = $("#intro-err"), chatErr = $("#chat-err");
+
+function bubble(text, who){
+  const d = document.createElement("div");
+  d.className = "msg " + (who === "me" ? "me" : "bot");
+  d.textContent = text;
+  chatEl.appendChild(d);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return d;
+}
+function typing(on){
+  let t = $("#typing");
+  if(on && !t){ t = document.createElement("div"); t.id="typing"; t.className="typing"; t.textContent="풀이 중…"; chatEl.appendChild(t); }
+  if(!on && t) t.remove();
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+function renderChips(list){
+  chipsEl.innerHTML = "";
+  (list || []).forEach((q) => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.textContent = q;
+    b.onclick = () => sendMessage(q);
+    chipsEl.appendChild(b);
+  });
+  chipsEl.hidden = !(list && list.length);
+}
+function showChat(){
+  introEl.hidden = true; chatEl.hidden = false; composerEl.hidden = false;
+  $("#sub").textContent = "무엇이든 편하게 물어보세요";
+}
+
+introEl.addEventListener("submit", async (e) => {
+  e.preventDefault(); introErr.hidden = true;
+  const body = {
+    user_id: userId || undefined,
+    name: $("#f-name").value.trim(),
+    year: $("#f-y").value.trim(), month: $("#f-m").value.trim(), day: $("#f-d").value.trim(),
+    hour: $("#f-h").value.trim() || 12,
+    is_lunar: $("#f-cal").value === "1",
+    gender: $("#f-g").value || undefined,
+    category: $("#f-cat").value,
+  };
+  if(!body.year || !body.month || !body.day){ introErr.textContent = "생년·월·일을 확인해주세요."; introErr.hidden = false; return; }
+  $("#start").disabled = true; $("#start").textContent = "풀이 중…";
+  try{
+    const r = await fetch(API + "/api/session", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error || "오류가 발생했어요.");
+    userId = data.user_id; localStorage.setItem("cmj_uid", userId);
+    showChat();
+    bubble(data.reply, "bot");
+    renderChips(data.quick_replies);
+  }catch(err){
+    introErr.textContent = err.message; introErr.hidden = false;
+  }finally{
+    $("#start").disabled = false; $("#start").textContent = "상담 시작";
+  }
+});
+
+async function sendMessage(text){
+  text = (text || "").trim(); if(!text) return;
+  chatErr.hidden = true;
+  bubble(text, "me"); renderChips([]); typing(true);
+  $("#q").value = "";
+  try{
+    const r = await fetch(API + "/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({user_id: userId, message: text})});
+    const data = await r.json();
+    typing(false);
+    if(!r.ok) throw new Error(data.error || "오류가 발생했어요.");
+    bubble(data.reply, "bot");
+    renderChips(data.quick_replies);
+  }catch(err){
+    typing(false); chatErr.textContent = err.message; chatErr.hidden = false;
+  }
+}
+composerEl.addEventListener("submit", (e) => { e.preventDefault(); sendMessage($("#q").value); });
+</script>
+</body>
+</html>

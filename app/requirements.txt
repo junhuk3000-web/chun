@@ -1,0 +1,12 @@
+# 이 서버 실행에 필요한 최소 패키지
+flask>=3.0
+requests>=2.31          # Meta Instagram Send API 호출용 (Claude 호출은 아래 SDK 사용)
+pandas>=2.0             # sajupy_vendor(만세력 계산)가 사용
+python-dateutil>=2.8
+anthropic>=0.40         # Claude 공식 파이썬 SDK (chat.py)
+python-dotenv>=1.0      # 로컬에서 .env 자동 로드 (배포 시엔 플랫폼 환경변수 사용, 없어도 무해)
+gunicorn>=21.0          # 배포용 WSGI 서버 (로컬 개발엔 불필요)
+
+# 선택: 설치하면 sajupy 가 도시 이름으로 경도를 자동 조회.
+# 없어도 saju_engine 내장 주요 도시(서울/부산 등)로 동작.
+# geopy>=2.3

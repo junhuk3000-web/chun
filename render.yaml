@@ -1,0 +1,25 @@
+# Render.com 배포 설정 (https://render.com — 무료 티어 가능, 비활성 시 슬립).
+# render.com 에서 "New + → Blueprint" 로 이 저장소를 연결하면 자동 적용.
+services:
+  - type: web
+    name: cheonmyeongjae-saju-chatbot
+    runtime: python
+    plan: free                     # 상시가동 필요하면 starter($7/월)로
+    buildCommand: pip install -r app/requirements.txt
+    startCommand: gunicorn --chdir app server:app --workers 1 --timeout 60 --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    disk:
+      name: session-data           # 세션 sqlite 영구 보관
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false                # 대시보드에서 직접 입력
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-4-5
+      - key: WEBHOOK_SECRET
+        generateValue: true        # 랜덤 생성 → 매니챗 헤더에 복사
+      - key: SESSION_DB
+        value: /var/data/sessions.db
+      - key: CHANNEL_NAME
+        value: 천명재
