@@ -315,17 +315,38 @@ def api_chat():
 def api_message():
     """매니챗 등 단일 트리거(예: Instagram Default Reply = 모든 수신 메시지)용 통합 엔드포인트.
     세션 없으면 텍스트에서 생년월일시를 파싱해 새로 시작, 있으면 후속 질문으로 처리.
-    body: {"user_id": "...", "text": "...", "name"?, "category"?}"""
+    body: {"user_id": "...", "text": "...", "name"?, "category"?}
+
+    항상 HTTP 200 + {"reply", "quick_replies"} 형태로만 응답한다(에러 상황도 포함).
+    매니챗 Response mapping 이 $.reply / $.quick_replies[0..2] 를 고정 매핑해두므로,
+    그 필드가 없는 응답(에러용 {"error": ...})을 주면 "Response is null" 류로 매핑이
+    깨진다 — 절대 그런 모양을 만들지 않는다."""
     if (u := _check_secret()):
         return u
+    body = _body()
     try:
-        return jsonify(_handle_message(_body()))
+        return jsonify(_handle_message(body))
     except ValueError as e:
-        return jsonify({"error": str(e)}), 422
+        return jsonify({
+            "user_id": body.get("user_id"),
+            "reply": "생년월일시를 다시 한번 편하게 보내줄래? 예) '1990년 7월 10일 오전 5시 여성' 🙏",
+            "quick_replies": [],
+            "error": str(e),
+        })
     except ChatError as e:
-        return jsonify({"error": str(e)}), 502
+        return jsonify({
+            "user_id": body.get("user_id"),
+            "reply": "어 미안, 지금 답변 만드는 데 문제가 생겼어. 잠시 후에 다시 물어봐줄래? 🙏",
+            "quick_replies": [],
+            "error": str(e),
+        })
     except Exception as e:  # noqa: BLE001
-        return jsonify({"error": f"사주 계산 실패: {e}"}), 400
+        return jsonify({
+            "user_id": body.get("user_id"),
+            "reply": "어 미안, 계산하다 오류가 났어. 생년월일시 형식 확인하고 다시 보내줄래? 🙏",
+            "quick_replies": [],
+            "error": str(e),
+        })
 
 
 @app.post("/api/session/reset")
