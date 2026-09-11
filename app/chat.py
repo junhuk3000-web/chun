@@ -72,9 +72,11 @@ SYSTEM_PROMPT = f"""당신은 {CHANNEL_NAME} 인스타그램 계정의 사주 �
    똑같이 짧게. 같은 사람과의 대화이므로 앞서 한 이야기와 모순되지 않게 자연스럽게 이어가세요.
 8. 마크다운 문법을 쓰지 마세요 (제목 `#`, 굵게 `**`, 목록 `-`/`1.` 금지). 소제목 없이
    대화체 문장만 쓰세요.
-9. 답변 맨 마지막 줄에는 사용자가 이어서 물어볼 만한 질문 2~3개를
+9. 답변 맨 마지막 줄에는 사용자가 이어서 물어볼 만한 질문 **정확히 3개**를
    `[추천질문] 질문1 | 질문2 | 질문3`
-   형식으로 정확히 한 줄 붙이세요. (이 줄은 화면에서 버튼으로 쓰입니다)
+   형식으로 한 줄 붙이세요. (이 줄은 인스타그램 퀵리플라이 **버튼**으로 그대로 쓰입니다)
+   버튼 글자수 제한 때문에 **각 질문은 공백 포함 20자를 절대 넘기지 마세요.**
+   완전한 문장 말고 짧은 구로: "연애운은?", "재물운 궁금해", "직업운 봐줘" 처럼.
 """
 
 CATEGORY_GUIDE = {
@@ -110,14 +112,28 @@ def _facts_block(name: Optional[str], saju: dict) -> str:
 
 _FOLLOWUP_RE = re.compile(r"\[추천질문\]\s*(.+)\s*$")
 
+QUICK_REPLY_MAX_LEN = 20  # 인스타그램/매니챗 퀵리플라이 버튼 글자수 제한
+
+# 매니챗 Response mapping 이 quick_replies[0..2] 세 자리를 고정으로 매핑해두므로,
+# Claude 가 3개를 못 채우면 빈 버튼이 생긴다 — 항상 3개가 되도록 이걸로 채운다.
+_FALLBACK_FOLLOWUPS = ["종합운 봐줘", "연애운은?", "재물운 궁금해", "직업운은?", "올해 운세는?", "성격 더 알려줘"]
+
+
+def _truncate(q: str) -> str:
+    q = q.strip(" ·-")
+    return q if len(q) <= QUICK_REPLY_MAX_LEN else q[: QUICK_REPLY_MAX_LEN - 1] + "…"
+
 
 def _split_followups(text: str) -> ChatResult:
     m = _FOLLOWUP_RE.search(text.strip())
-    if not m:
-        return {"reply": text.strip(), "quick_replies": []}
-    reply = text[: m.start()].strip()
-    qs = [q.strip(" ·-") for q in m.group(1).split("|")]
+    reply = text[: m.start()].strip() if m else text.strip()
+    qs = [_truncate(q) for q in m.group(1).split("|")] if m else []
     qs = [q for q in qs if q][:3]
+    for fb in _FALLBACK_FOLLOWUPS:
+        if len(qs) >= 3:
+            break
+        if fb not in qs:
+            qs.append(fb)
     return {"reply": reply, "quick_replies": qs}
 
 
