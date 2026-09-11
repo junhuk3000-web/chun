@@ -31,3 +31,7 @@ services:
         value: /var/data/sessions.db   # 영구 디스크 경로 (재배포/재시작해도 대화기록 유지)
       - key: CHANNEL_NAME
         value: 천명재
+      - key: MAX_FREE_TURNS
+        value: "9999"          # 매니챗 Condition 분기(버튼 숨김)가 자동루프 버그를 일으켜서
+                                # 당분간 턴 제한 비활성화 — 버튼은 항상 표시, 대신 항상 새로 계산된
+                                # 추천질문 3개가 실리므로 예전처럼 필드값이 안 굳고 정상 동작함
