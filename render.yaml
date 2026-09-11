@@ -11,7 +11,10 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r app/requirements.txt
-    startCommand: gunicorn --chdir app server:app --workers 1 --timeout 60 --bind 0.0.0.0:$PORT
+    # gthread + threads=8: 요청 대부분이 Claude API 응답을 '기다리는' I/O 대기 시간이라
+    # (CPU 계산은 짧음), 동기 워커 1개보다 스레드로 동시 처리하는 게 이 워크로드에 훨씬 유리함.
+    # 워커 프로세스는 1개로 유지(메모리 절약, sqlite 단일 프로세스 접근이 더 단순).
+    startCommand: gunicorn --chdir app server:app --worker-class gthread --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT
     healthCheckPath: /health
     disk:
       name: session-data
