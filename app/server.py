@@ -152,6 +152,30 @@ def _throttle_for_instagram_limit() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 무료 대화 턴 제한 (계정 초반 리스크 관리)
+# ---------------------------------------------------------------------------
+# 한 세션(첫 풀이 포함)에서 MAX_FREE_TURNS 번까지만 퀵리플라이 버튼을 보여준다.
+# 그 이후 질문에도 답변 자체는 계속 해주되, 버튼을 더 안 띄워서 대화가 자연스럽게
+# 잦아들게 한다(무제한 왕복으로 인스타 발송량이 계속 느는 걸 막는 목적도 겸함).
+# 나중에 유료 랜딩페이지로 유도하고 싶으면 LANDING_PAGE_URL 환경변수만 채우면
+# 자동으로 "더 보려면 여기" CTA 문구 + 링크가 붙는다(지금은 비워두면 조용히 버튼만 멈춤).
+MAX_FREE_TURNS = int(os.environ.get("MAX_FREE_TURNS", "4"))
+LANDING_PAGE_URL = os.environ.get("LANDING_PAGE_URL", "").strip()
+
+
+def _apply_turn_limit(prior_history: list, out: dict) -> dict:
+    turn_index = len(prior_history) // 2 + 1  # 이번 응답이 세션에서 몇 번째 턴인지(1부터, 첫 풀이=1)
+    if turn_index <= MAX_FREE_TURNS:
+        return out
+    out = dict(out)
+    out["quick_replies"] = []
+    if LANDING_PAGE_URL:
+        out["reply"] = out["reply"] + f"\n\n더 자세히 보고 싶으면 여기서 확인해봐 👉 {LANDING_PAGE_URL}"
+        out["cta_url"] = LANDING_PAGE_URL
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 공통 로직
 # ---------------------------------------------------------------------------
 
@@ -191,7 +215,7 @@ def _start_session(body: dict) -> dict:
     saju = result.to_prompt_dict()
     sessions.create(user_id, name, saju)
 
-    out = first_reading(name, saju, category=category)
+    out = _apply_turn_limit([], first_reading(name, saju, category=category))
     sessions.append_message(user_id, "user", f"({category} 첫 풀이 요청)")
     sessions.append_message(user_id, "assistant", out["reply"])
     return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "saju": saju}
@@ -207,7 +231,7 @@ def _continue_session(body: dict) -> dict:
     if not s:
         raise LookupError("세션이 없습니다. 먼저 생년월일시로 상담을 시작해주세요.")
 
-    out = answer(s["name"], s["saju"], s["history"], message)
+    out = _apply_turn_limit(s["history"], answer(s["name"], s["saju"], s["history"], message))
     sessions.append_message(user_id, "user", message)
     sessions.append_message(user_id, "assistant", out["reply"])
     return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"]}
@@ -226,7 +250,7 @@ def _handle_message(body: dict) -> dict:
 
     s = sessions.get(user_id)
     if s:
-        out = answer(s["name"], s["saju"], s["history"], text)
+        out = _apply_turn_limit(s["history"], answer(s["name"], s["saju"], s["history"], text))
         sessions.append_message(user_id, "user", text)
         sessions.append_message(user_id, "assistant", out["reply"])
         return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "new_session": False}
@@ -247,7 +271,7 @@ def _handle_message(body: dict) -> dict:
     )
     saju = result.to_prompt_dict()
     sessions.create(user_id, name, saju)
-    out = first_reading(name, saju, category=body.get("category") or "종합운")
+    out = _apply_turn_limit([], first_reading(name, saju, category=body.get("category") or "종합운"))
     sessions.append_message(user_id, "user", f"(생년월일시 제공: {text})")
     sessions.append_message(user_id, "assistant", out["reply"])
     return {"user_id": user_id, "reply": out["reply"], "quick_replies": out["quick_replies"], "new_session": True, "saju": saju}
