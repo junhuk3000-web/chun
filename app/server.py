@@ -224,7 +224,7 @@ def _handle_message(body: dict) -> dict:
     if not is_complete(info):
         return {
             "user_id": user_id,
-            "reply": "생년월일시를 알려주시면 만세력으로 사주를 봐드릴게요. 예) '1990년 7월 10일 오전 5시 여성'처럼 편하게 보내주세요 🔮",
+            "reply": "생년월일시를 알려주시면 만세력으로 사주를 봐드릴게요. 줄바꿈 없이 **한 줄로** '1990년 7월 10일 오전 5시 여성'처럼 편하게 보내주세요 🔮",
             "quick_replies": [],
             "new_session": False,
         }
