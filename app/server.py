@@ -34,6 +34,7 @@ WEBHOOK_SECRET 과 일치해야 처리된다. WEBHOOK_SECRET 이 비어 있으�
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from typing import Optional
 
@@ -64,6 +65,34 @@ def _check_secret():
     if request.headers.get("X-Webhook-Secret") != WEBHOOK_SECRET:
         return jsonify({"error": "unauthorized"}), 401
     return None
+
+
+_LENIENT_FIELDS = ("user_id", "message", "text", "name", "category", "gender", "city")
+
+
+def _parse_body_lenient(raw: bytes) -> dict:
+    """일부 트리거 플랫폼(매니챗 등)은 자유 텍스트에 포함된 줄바꿈을 이스케이프하지
+    않고 그대로 JSON 문자열 안에 넣어 보내서 'Invalid JSON'이 되는 경우가 있다
+    (예: 고객이 생년월일시를 여러 줄로 나눠 보냄). 정식 JSON 파싱이 실패하면,
+    알려진 필드들을 정규식으로 관대하게 복구해서 최소한 동작은 하게 한다."""
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for key in _LENIENT_FIELDS:
+        m = re.search(rf'"{re.escape(key)}"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
+        if m:
+            out[key] = m.group(1).replace('\\"', '"').replace("\\n", "\n").replace("\\\\", "\\")
+    return out
+
+
+def _body() -> dict:
+    """request JSON body를 읽되, 파싱 실패 시 관대한 복구를 시도한다."""
+    data = request.get_json(silent=True)
+    if data is not None:
+        return data
+    return _parse_body_lenient(request.get_data())
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +231,7 @@ def api_session():
     if (u := _check_secret()):
         return u
     try:
-        return jsonify(_start_session(request.get_json(silent=True) or {}))
+        return jsonify(_start_session(_body()))
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
     except ChatError as e:
@@ -216,7 +245,7 @@ def api_chat():
     if (u := _check_secret()):
         return u
     try:
-        return jsonify(_continue_session(request.get_json(silent=True) or {}))
+        return jsonify(_continue_session(_body()))
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
     except LookupError as e:
@@ -233,7 +262,7 @@ def api_message():
     if (u := _check_secret()):
         return u
     try:
-        return jsonify(_handle_message(request.get_json(silent=True) or {}))
+        return jsonify(_handle_message(_body()))
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
     except ChatError as e:
@@ -246,7 +275,7 @@ def api_message():
 def api_reset():
     if (u := _check_secret()):
         return u
-    body = request.get_json(silent=True) or {}
+    body = _body()
     if body.get("user_id"):
         sessions.reset(str(body["user_id"]))
     return jsonify({"status": "ok"})
@@ -257,7 +286,7 @@ def manychat_session():
     if (u := _check_secret()):
         return u
     try:
-        return jsonify(_manychat(_start_session(request.get_json(silent=True) or {})))
+        return jsonify(_manychat(_start_session(_body())))
     except (ValueError, ChatError) as e:
         return jsonify({"version": "v2", "content": {"messages": [{"type": "text", "text": f"⚠️ {e}"}]}})
     except Exception as e:  # noqa: BLE001
@@ -269,7 +298,7 @@ def manychat_chat():
     if (u := _check_secret()):
         return u
     try:
-        return jsonify(_manychat(_continue_session(request.get_json(silent=True) or {})))
+        return jsonify(_manychat(_continue_session(_body())))
     except (ValueError, LookupError, ChatError) as e:
         return jsonify({"version": "v2", "content": {"messages": [{"type": "text", "text": f"⚠️ {e}"}]}})
 
@@ -279,7 +308,7 @@ def webhook_raw_text():
     """단발 테스트용: 자유 텍스트 → 파싱 → 첫 풀이 1회 (세션 저장 안 함)."""
     if (u := _check_secret()):
         return u
-    body = request.get_json(silent=True) or {}
+    body = _body()
     info = parse_birth_info(body.get("text", ""))
     if not is_complete(info):
         return jsonify({"error": "생년월일을 인식하지 못했습니다.", "parsed": info}), 422
@@ -316,7 +345,7 @@ def instagram_verify():
 
 @app.post("/webhook/instagram")
 def instagram_receive():
-    payload = request.get_json(silent=True) or {}
+    payload = _body()
     for entry in payload.get("entry", []):
         for ev in entry.get("messaging", []):
             sender_id = ev.get("sender", {}).get("id")

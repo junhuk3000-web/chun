@@ -21,7 +21,7 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false                # 대시보드에서 직접 입력
       - key: ANTHROPIC_MODEL
-        value: claude-haiku-4-5
+        value: claude-sonnet-5     # haiku보다 안정적(오류 빈도 낮음). 비용 차이는 미미함
       - key: WEBHOOK_SECRET
         generateValue: true        # 랜덤 생성 → 매니챗 헤더에 복사
       - key: SESSION_DB
