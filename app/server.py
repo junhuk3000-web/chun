@@ -96,6 +96,51 @@ def _body() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Instagram 발송 속도 제한 대응
+# ---------------------------------------------------------------------------
+# Meta Instagram Messaging API 는 계정당 시간당 자동 DM 약 200건으로 제한된다.
+# 게다가 이 automation 은 사람당 최소 2건(①"잠시만요..." 캔드 메시지 ②우리 답변)을
+# 쓰므로 실질 처리 가능 인원은 시간당 200건보다 적다. 이 한도를 넘겨서 Meta 쪽에서
+# 거부/제재당하느니, 우리 쪽에서 먼저 스스로 속도를 늦추는 게 안전하다(최대 대기 시간
+# 안에서는 늦게라도 정확한 답을 준다).
+#
+# 구현: 최근 1시간 안에 응답한 건수를 메모리에서 슬라이딩 윈도우로 추적. 한도에 걸리면
+# 여유가 생길 때까지 이 요청을 대기시킨다(최대 MAX_QUEUE_WAIT_SECONDS, 기본 5분).
+# ⚠️ 단일 gunicorn 프로세스(워커 1개, 스레드 여러 개) 전제 — 워커를 여러 프로세스로
+#    늘리면 이 카운터를 Redis 등 프로세스 공유 저장소로 옮겨야 정확해진다.
+import threading
+import time
+from collections import deque
+
+_send_times: deque = deque()
+_send_lock = threading.Lock()
+
+RATE_LIMIT_PER_HOUR = int(os.environ.get("RATE_LIMIT_PER_HOUR", "80"))
+# 200건 한도를 "잠시만요" 캔드메시지(매니챗이 우리 몰래 보냄, 카운트 불가) +
+# 우리 답변, 최소 2건/명 기준으로 넉넉히 나눠서 기본값을 80으로 보수적으로 잡음.
+RATE_WINDOW_SECONDS = 3600
+MAX_QUEUE_WAIT_SECONDS = int(os.environ.get("MAX_QUEUE_WAIT_SECONDS", "300"))  # 5분
+
+
+def _throttle_for_instagram_limit() -> None:
+    deadline = time.monotonic() + MAX_QUEUE_WAIT_SECONDS
+    while True:
+        now = time.monotonic()
+        with _send_lock:
+            while _send_times and now - _send_times[0] > RATE_WINDOW_SECONDS:
+                _send_times.popleft()
+            if len(_send_times) < RATE_LIMIT_PER_HOUR:
+                _send_times.append(now)
+                return
+        if time.monotonic() >= deadline:
+            # 5분 넘게 기다렸으면 더는 막지 않고 진행(응답을 아예 안 주는 것보단 낫다).
+            with _send_lock:
+                _send_times.append(time.monotonic())
+            return
+        time.sleep(2)
+
+
+# ---------------------------------------------------------------------------
 # 공통 로직
 # ---------------------------------------------------------------------------
 
@@ -121,6 +166,7 @@ def _resolve_birth(body: dict) -> dict:
 
 
 def _start_session(body: dict) -> dict:
+    _throttle_for_instagram_limit()
     user_id = str(body.get("user_id") or uuid.uuid4())
     name = (body.get("name") or "").strip() or None
     category = body.get("category") or "종합운"
@@ -141,6 +187,7 @@ def _start_session(body: dict) -> dict:
 
 
 def _continue_session(body: dict) -> dict:
+    _throttle_for_instagram_limit()
     user_id = str(body.get("user_id") or "")
     message = (body.get("message") or "").strip()
     if not user_id or not message:
@@ -159,6 +206,7 @@ def _handle_message(body: dict) -> dict:
     """단일 엔드포인트로 '첫 연락(생년월일시 파싱→세션생성→첫풀이)'과
     '후속 질문(세션 이어서 답변)'을 모두 처리. 매니챗 쪽에 automation을
     두 개(트리거용/대화용) 따로 안 만들어도 되게 하기 위함."""
+    _throttle_for_instagram_limit()
     user_id = str(body.get("user_id") or "")
     text = (body.get("text") or body.get("message") or "").strip()
     name = (body.get("name") or "").strip() or None
