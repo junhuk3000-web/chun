@@ -58,6 +58,16 @@ WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET") or None
 DEFAULT_CITY = os.environ.get("DEFAULT_CITY", "Seoul")
 
+# 고객에게 필요한 건 이름이 아니라 생년월일·태어난시각·성별 3가지뿐이다(이름은 절대
+# 요구하지 않음). 표기 방식은 사람마다 제각각이라(구분자 있는/없는, 2자리/4자리 연도
+# 등) birth_parser.py 가 최대한 포괄적으로 인식하므로, 안내 문구도 "형식 안 가리고
+# 편하게 보내도 된다"는 걸 예시로 보여준다.
+BIRTH_REQUEST_MSG = (
+    "생년월일이랑 태어난 시각, 성별을 알려주면 사주 봐줄게! 이름은 몰라도 돼~ "
+    "숫자 표기는 편한 대로 써도 다 인식돼 — "
+    "'1990-07-10 오전 5시 여자', '900710 0505 여', '90.7.10 17시 남' 다 가능해 🔮"
+)
+
 
 def _check_secret():
     if WEBHOOK_SECRET is None:
@@ -196,7 +206,7 @@ def _resolve_birth(body: dict) -> dict:
     if body.get("text"):
         info = parse_birth_info(body["text"])
         if not is_complete(info):
-            raise ValueError("생년월일을 인식하지 못했습니다. 예) '1990년 7월 10일 오전 5시 남자'")
+            raise ValueError(BIRTH_REQUEST_MSG)
         return {
             "year": info["year"], "month": info["month"], "day": info["day"],
             "hour": info.get("hour", 12), "minute": info.get("minute", 0),
@@ -287,8 +297,7 @@ def _handle_message(body: dict) -> dict:
         # "그 사람 정보 없다"고 어색하게 거절해버린다 — 명확한 재입력 안내로 대체한다.
         return {
             "user_id": user_id,
-            "reply": "생년월일시를 새로 알려주려는 것 같은데 일부가 인식이 안 됐어! 줄바꿈 없이 한 줄로 "
-                     "'이름 1990년 7월 10일 오전 5시 여성'처럼 정확하게 다시 보내줄래? 🙏",
+            "reply": "새 생년월일시를 알려주려는 것 같은데 일부가 인식이 안 됐어! " + BIRTH_REQUEST_MSG,
             "quick_replies": [],
             "show_buttons": False,
             "new_session": False,
@@ -306,7 +315,7 @@ def _handle_message(body: dict) -> dict:
     if not new_complete:
         return {
             "user_id": user_id,
-            "reply": "생년월일시를 알려주시면 만세력으로 사주를 봐드릴게요. 줄바꿈 없이 **한 줄로** '1990년 7월 10일 오전 5시 여성'처럼 편하게 보내주세요 🔮",
+            "reply": BIRTH_REQUEST_MSG,
             "quick_replies": [],
             "show_buttons": False,
             "new_session": False,
@@ -415,7 +424,7 @@ def api_message():
     except ValueError as e:
         return jsonify({
             "user_id": body.get("user_id"),
-            "reply": "생년월일시를 다시 한번 편하게 보내줄래? 예) '1990년 7월 10일 오전 5시 여성' 🙏",
+            "reply": BIRTH_REQUEST_MSG,
             "quick_replies": [],
             "show_buttons": False,
             "error": str(e),
@@ -478,7 +487,7 @@ def webhook_raw_text():
     body = _body()
     info = parse_birth_info(body.get("text", ""))
     if not is_complete(info):
-        return jsonify({"error": "생년월일을 인식하지 못했습니다.", "parsed": info}), 422
+        return jsonify({"error": BIRTH_REQUEST_MSG, "parsed": info}), 422
     try:
         result = calculate(
             year=info["year"], month=info["month"], day=info["day"],
@@ -528,7 +537,7 @@ def instagram_receive():
                 if out.get("quick_replies"):
                     reply += "\n\n💬 " + "  /  ".join(out["quick_replies"])
             except (ValueError, LookupError) as e:
-                reply = f"생년월일시를 '1990년 7월 10일 오전 5시 남자' 형식으로 보내주세요 🙏 ({e})"
+                reply = BIRTH_REQUEST_MSG
             except ChatError as e:
                 reply = f"죄송해요, 지금 답변 생성에 문제가 생겼어요. ({e})"
             _send_instagram_reply(sender_id, reply)
