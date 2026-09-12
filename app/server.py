@@ -69,6 +69,11 @@ def _check_secret():
 
 _LENIENT_FIELDS = ("user_id", "message", "text", "name", "category", "gender", "city")
 
+# "연도로 보이는 숫자가 있는데 birth_parser가 완전한 날짜로 못 뽑아낸" 경우를 잡기 위한
+# 대략적인 감지기. 완벽할 필요 없음 — 오탐(false positive)이 나도 "다시 정확히 보내줘"라는
+# 무난한 안내만 나가므로 안전한 방향의 휴리스틱이다.
+_YEAR_LIKE_RE = re.compile(r"(19|20)\d{2}|\d{2}\s*년")
+
 
 def _parse_body_lenient(raw: bytes) -> dict:
     """일부 트리거 플랫폼(매니챗 등)은 자유 텍스트에 포함된 줄바꿈을 이스케이프하지
@@ -274,6 +279,20 @@ def _handle_message(body: dict) -> dict:
         same_date = s["saju"].get("생년월일시") == f"{info['year']:04d}-{info['month']:02d}-{info['day']:02d}"
         if not same_date:
             s = None
+
+    if s and not new_complete and _YEAR_LIKE_RE.search(text):
+        # 세션은 있는데(본인 상담 중) 메시지에 연도로 보이는 숫자가 있어서 새 생년월일을
+        # 시도한 것 같은데, 월/일 등 일부가 파싱에 실패해 '완전한' 날짜가 안 됐다.
+        # 이걸 그냥 후속질문으로 넘기면 Claude가 기존 세션 사주 기준으로 엉뚱하게 답하거나
+        # "그 사람 정보 없다"고 어색하게 거절해버린다 — 명확한 재입력 안내로 대체한다.
+        return {
+            "user_id": user_id,
+            "reply": "생년월일시를 새로 알려주려는 것 같은데 일부가 인식이 안 됐어! 줄바꿈 없이 한 줄로 "
+                     "'이름 1990년 7월 10일 오전 5시 여성'처럼 정확하게 다시 보내줄래? 🙏",
+            "quick_replies": [],
+            "show_buttons": False,
+            "new_session": False,
+        }
 
     if s:
         out = _apply_turn_limit(s["history"], answer(s["name"], s["saju"], s["history"], text))

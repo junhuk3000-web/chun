@@ -42,18 +42,19 @@ def parse_birth_info(text: str) -> BirthInfo:
     """
     info: BirthInfo = {"raw_text": text}
 
-    # 1) 날짜: YYYY년 M월 D일  /  YYYY-MM-DD  /  YYYY.MM.DD  /  YYYY/MM/DD
-    m = re.search(r"(\d{4})\s*[년.\-/]\s*(\d{1,2})\s*[월.\-/]\s*(\d{1,2})\s*일?", text)
+    # 1) 날짜: YYYY년 M월 D일 / YYYY-MM-DD / YYYY.MM.DD / YYYY/MM/DD / YY년 M월 D일(2자리+'년') 등
+    # 연도는 2~4자리, 구분자는 년/./-//를 자유롭게 섞어 써도(붙여쓰기 포함) 인식한다.
+    # 실제 사용자들은 "96년 5월 12일"처럼 2자리+'년'을 아주 흔하게 쓰는데, 예전 버전은
+    # 2자리 연도는 점/대시/슬래시 구분자에서만 인식해서 이 흔한 표기를 놓치는 문제가 있었다.
+    m = re.search(r"(\d{2,4})\s*[년.\-/]\s*(\d{1,2})\s*[월.\-/]\s*(\d{1,2})\s*일?", text)
     if m:
-        info["year"], info["month"], info["day"] = (int(x) for x in m.groups())
-    else:
-        # 2자리 연도(예: 90.7.10) — 00~29는 2000년대, 30~99는 1900년대로 추정.
-        # 애매한 경계값이므로 가능하면 4자리 연도 입력을 우선 권장.
-        m = re.search(r"\b(\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})\b", text)
-        if m:
-            yy, mm, dd = (int(x) for x in m.groups())
-            info["year"] = 2000 + yy if yy <= 29 else 1900 + yy
-            info["month"], info["day"] = mm, dd
+        y_raw, mo, d = m.groups()
+        year = int(y_raw)
+        if len(y_raw) <= 2:
+            # 2자리 연도(예: 90 → 1990) — 00~29는 2000년대, 30~99는 1900년대로 추정.
+            # 애매한 경계값이므로 가능하면 4자리 연도 입력을 권장.
+            year = 2000 + year if year <= 29 else 1900 + year
+        info["year"], info["month"], info["day"] = year, int(mo), int(d)
 
     # 2) 시간: "오전/오후 N시", "N시 M분", "HH:MM"
     m = re.search(r"(오전|오후)?\s*(\d{1,2})\s*시\s*(\d{1,2})?\s*분?", text)
